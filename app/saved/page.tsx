@@ -18,14 +18,16 @@ export default async function SavedPage() {
   return (
     <>
       <Nav />
-      <main className="mx-auto w-full max-w-6xl px-4 pb-16 sm:px-6">
+      <main className="mx-auto w-full max-w-6xl overflow-hidden px-4 pb-16 sm:px-6">
         <header className="py-10">
-          <p className="text-sm font-bold uppercase tracking-[0.18em] text-gold">
+          <p className="text-sm font-bold uppercase tracking-[0.14em] text-gold sm:tracking-[0.18em]">
             Reading List
           </p>
-          <h1 className="mt-3 text-4xl font-black text-ink">Saved Items</h1>
+          <h1 className="mt-3 [overflow-wrap:anywhere] text-4xl font-black text-ink">
+            Saved Items
+          </h1>
         </header>
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2">
           {items.map((item) => (
             <BriefingCard key={item.id} item={item} />
           ))}
