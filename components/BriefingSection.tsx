@@ -10,8 +10,8 @@ export function BriefingSection({ title, items }: Props) {
   return (
     <section className="mt-8 min-w-0">
       <div className="mb-4 flex min-w-0 flex-wrap items-end justify-between gap-2">
-        <h2 className="min-w-0 text-xl font-bold leading-tight text-ink">{title}</h2>
-        <span className="shrink-0 text-sm font-medium text-ink/45">
+        <h2 className="min-w-0 text-xl font-bold leading-tight text-ink dark:text-white">{title}</h2>
+        <span className="shrink-0 text-sm font-medium text-ink/45 dark:text-white/45">
           {items.length} updates
         </span>
       </div>

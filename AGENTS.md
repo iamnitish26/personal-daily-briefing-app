@@ -11,6 +11,7 @@ The app should provide:
 * Databricks certification learning bytes.
 * Saved/bookmarked items.
 * Personal feedback such as “more like this” and “less like this”.
+* Daily signal cards, YouTube intelligence, emerging trends, and LinkedIn content opportunities.
 
 Primary user profile:
 
@@ -151,6 +152,8 @@ Each news item should include:
 * Source
 * Link
 * 2 to 4 line summary
+* Detailed expanded summary
+* Key takeaways
 * Why it matters
 * Category
 * Relevance score
@@ -308,6 +311,7 @@ Rules:
 
 * Summarise only new items.
 * Cache generated summaries.
+* Generate daily signals once during ingestion, never live on page load.
 * Limit daily ingested items per source.
 * Limit OpenAI calls during local development.
 * Add a dry-run mode for ingestion.

@@ -21,9 +21,16 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const briefing = await runDailyIngestion();
+    const dryRun = request.nextUrl.searchParams.get("dryRun") === "true";
+    const force = request.nextUrl.searchParams.get("force") === "true";
+    const briefing = await runDailyIngestion({
+      dryRun,
+      force,
+      mode: dryRun ? "dry_run" : "manual_or_cron"
+    });
     return NextResponse.json({ briefing });
   } catch (error) {
+    console.error("Ingestion failed", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Ingestion failed" },
       { status: 500 }

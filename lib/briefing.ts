@@ -1,12 +1,46 @@
-import type { BriefingItem, DailyBriefing, RawItem, Source } from "@/lib/types";
+import type {
+  BriefingItem,
+  DailyBriefing,
+  DailySignal,
+  DailyVideoPick,
+  IngestionRun,
+  LinkedInIdea,
+  RawItem,
+  Source,
+  YouTubeVideo
+} from "@/lib/types";
 import { todayIsoDate } from "@/lib/date";
 import { fetchAllSourceItems } from "@/lib/ingest";
-import { summarizeItems } from "@/lib/openai";
+import {
+  enrichVideoPicks,
+  generateDailySignal,
+  generateLinkedInIdeas,
+  summarizeItems
+} from "@/lib/openai";
 import { generateCertificationByte, selectTopicForDate } from "@/lib/certification";
 import { getSupabaseAnonClient, getSupabaseServiceClient } from "@/lib/supabase";
+import { discoverYouTubeVideos } from "@/lib/youtube";
+
+type IngestionOptions = {
+  date?: string;
+  dryRun?: boolean;
+  force?: boolean;
+  mode?: string;
+};
+
+function normalizeStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
 
 export async function getTodayBriefing(): Promise<DailyBriefing | null> {
-  const supabase = getSupabaseAnonClient();
+  const supabase =
+    typeof window === "undefined" ? getSupabaseServiceClient() : getSupabaseAnonClient();
   const date = todayIsoDate();
 
   const { data: briefing, error: briefingError } = await supabase
@@ -18,8 +52,14 @@ export async function getTodayBriefing(): Promise<DailyBriefing | null> {
   if (briefingError) throw briefingError;
   if (!briefing) return null;
 
-  const [{ data: items, error: itemsError }, { data: certificationByte }] =
-    await Promise.all([
+  const [
+    { data: items, error: itemsError },
+    { data: certificationByte },
+    { data: dailySignal },
+    { data: videoPicks },
+    { data: linkedinIdeas },
+    { data: latestRun }
+  ] = await Promise.all([
       supabase
         .from("briefing_items")
         .select("*")
@@ -30,6 +70,24 @@ export async function getTodayBriefing(): Promise<DailyBriefing | null> {
         .from("certification_bytes")
         .select("*")
         .eq("briefing_date", date)
+        .maybeSingle(),
+      supabase.from("daily_signals").select("*").eq("briefing_date", date).maybeSingle(),
+      supabase
+        .from("daily_video_picks")
+        .select("*, video:youtube_videos(*)")
+        .eq("briefing_date", date)
+        .order("rank"),
+      supabase
+        .from("linkedin_ideas")
+        .select("*")
+        .eq("briefing_date", date)
+        .order("idea_type"),
+      supabase
+        .from("ingestion_runs")
+        .select("*")
+        .eq("run_date", date)
+        .order("started_at", { ascending: false })
+        .limit(1)
         .maybeSingle()
     ]);
 
@@ -37,13 +95,150 @@ export async function getTodayBriefing(): Promise<DailyBriefing | null> {
 
   return {
     ...briefing,
-    items: items ?? [],
-    certification_byte: certificationByte ?? null
+    items: ((items ?? []) as BriefingItem[]).map((item) => ({
+      ...item,
+      key_takeaways: normalizeStringArray(item.key_takeaways),
+      related_technologies: normalizeStringArray(item.related_technologies)
+    })),
+    certification_byte: certificationByte ?? null,
+    daily_signal: (dailySignal as DailySignal | null) ?? null,
+    video_picks: ((videoPicks ?? []) as DailyVideoPick[]) ?? [],
+    linkedin_ideas: ((linkedinIdeas ?? []) as LinkedInIdea[]) ?? [],
+    latest_ingestion_run: (latestRun as IngestionRun | null) ?? null
   };
 }
 
-export async function runDailyIngestion(date = todayIsoDate()) {
+async function summarizeWithCache(items: RawItem[]) {
   const supabase = getSupabaseServiceClient();
+  if (!items.length) return { items: [] as BriefingItem[], generatedCount: 0, tokenEstimate: 0 };
+
+  const hashes = items.map((item) => item.hash);
+  const { data: cachedRows, error: cacheError } = await supabase
+    .from("article_summaries")
+    .select("*")
+    .in("raw_item_hash", hashes);
+
+  if (cacheError) throw cacheError;
+
+  const cachedByHash = new Map((cachedRows ?? []).map((row) => [row.raw_item_hash, row]));
+  const missing = items.filter((item) => !cachedByHash.has(item.hash));
+  const generated = await summarizeItems(missing);
+
+  if (generated.length) {
+    const rawByIdOrHash = new Map(
+      missing.map((item) => [item.id ?? item.hash, item] as const)
+    );
+    const rows = generated.map((summary) => {
+      const raw = summary.raw_item_id ? rawByIdOrHash.get(summary.raw_item_id) : undefined;
+      const fallbackRaw = missing.find((item) => item.url === summary.link);
+      const item = raw ?? fallbackRaw;
+      return {
+        raw_item_hash: item?.hash ?? summary.link,
+        raw_item_id: item?.id ?? null,
+        title: summary.title,
+        summary: summary.summary,
+        detailed_summary: summary.detailed_summary ?? summary.summary,
+        key_takeaways: summary.key_takeaways ?? [],
+        why_it_matters: summary.why_it_matters,
+        related_technologies: summary.related_technologies ?? [],
+        category: summary.category,
+        model: process.env.OPENAI_API_KEY ? "gpt-4o-mini" : "fallback",
+        token_estimate: estimateTokens(
+          `${item?.title ?? ""} ${item?.content ?? ""} ${summary.summary} ${summary.why_it_matters}`
+        ),
+        updated_at: new Date().toISOString()
+      };
+    });
+
+    const { error } = await supabase
+      .from("article_summaries")
+      .upsert(rows, { onConflict: "raw_item_hash" });
+    if (error) throw error;
+  }
+
+  const generatedByRawId = new Map(generated.map((item) => [item.raw_item_id, item]));
+  const generatedByLink = new Map(generated.map((item) => [item.link, item]));
+  const briefingItems = items.map((raw, index) => {
+    const generatedItem = generatedByRawId.get(raw.id ?? "") ?? generatedByLink.get(raw.url);
+    const cached = cachedByHash.get(raw.hash);
+    const source = generatedItem ?? {
+      id: crypto.randomUUID(),
+      briefing_id: "",
+      raw_item_id: raw.id ?? null,
+      section: raw.category === "ai" ? "ai" : "data_engineering",
+      rank: index + 1,
+      title: cached?.title ?? raw.title,
+      summary: cached?.summary ?? raw.content ?? "No summary available.",
+      detailed_summary: cached?.detailed_summary ?? cached?.summary ?? raw.content ?? null,
+      key_takeaways: normalizeStringArray(cached?.key_takeaways),
+      related_technologies: normalizeStringArray(cached?.related_technologies),
+      source: raw.url,
+      link: raw.url,
+      category: cached?.category ?? raw.category,
+      why_it_matters: cached?.why_it_matters ?? "This item matched the briefing profile.",
+      read_time_minutes: 1,
+      published_at: raw.published_at ?? null,
+      saved: false
+    };
+    return {
+      ...source,
+      rank: index + 1,
+      published_at: raw.published_at ?? null,
+      read_time_minutes: estimateTokens(
+        `${source.summary} ${source.detailed_summary ?? ""} ${source.why_it_matters}`
+      )
+        ? Math.max(1, Math.ceil(`${source.summary} ${source.detailed_summary ?? ""}`.split(/\s+/).length / 220))
+        : 1
+    };
+  });
+
+  const tokenEstimate = [...(cachedRows ?? []), ...generated].reduce(
+    (sum, item) =>
+      sum +
+      estimateTokens(
+        `${item.title ?? ""} ${item.summary ?? ""} ${item.detailed_summary ?? ""} ${item.why_it_matters ?? ""}`
+      ),
+    0
+  );
+
+  return { items: briefingItems, generatedCount: generated.length, tokenEstimate };
+}
+
+export async function runDailyIngestion(options: IngestionOptions = {}) {
+  const supabase = getSupabaseServiceClient();
+  const date = options.date ?? todayIsoDate();
+  const mode = options.mode ?? (options.dryRun ? "dry_run" : "manual_or_cron");
+
+  const { data: existingBriefing } = await supabase
+    .from("briefings")
+    .select("id")
+    .eq("briefing_date", date)
+    .maybeSingle();
+
+  if (existingBriefing && !options.force && !options.dryRun) {
+    const [{ count: itemCount }, { data: signal }] = await Promise.all([
+      supabase
+        .from("briefing_items")
+        .select("id", { count: "exact", head: true })
+        .eq("briefing_id", existingBriefing.id),
+      supabase.from("daily_signals").select("id").eq("briefing_date", date).maybeSingle()
+    ]);
+
+    if ((itemCount ?? 0) > 0 && signal) {
+      return getTodayBriefing();
+    }
+  }
+
+  const { data: runRow } = await supabase
+    .from("ingestion_runs")
+    .insert({
+      run_date: date,
+      mode,
+      status: "started",
+      dry_run: options.dryRun ?? false
+    })
+    .select()
+    .single();
 
   const { data: sources, error: sourceError } = await supabase
     .from("sources")
@@ -53,35 +248,55 @@ export async function runDailyIngestion(date = todayIsoDate()) {
   if (sourceError) throw sourceError;
 
   const rawItems = await fetchAllSourceItems((sources ?? []) as Source[]);
+  const articlesDeduplicated = rawItems.length;
   const rawRows = rawItems.map((item) => ({
     ...item,
     fetched_at: new Date().toISOString()
   }));
 
-  if (rawRows.length) {
+  if (rawRows.length && !options.dryRun) {
     const { error } = await supabase
       .from("raw_items")
       .upsert(rawRows, { onConflict: "hash" });
     if (error) throw error;
   }
 
-  const { data: storedRawItems, error: rawError } = await supabase
-    .from("raw_items")
-    .select("*")
-    .gte("fetched_at", `${date}T00:00:00.000Z`)
-    .order("relevance_score", { ascending: false })
-    .limit(30);
+  let candidateRawItems: RawItem[];
+  if (options.dryRun) {
+    candidateRawItems = rawItems
+      .sort((a, b) => (b.relevance_score ?? 0) - (a.relevance_score ?? 0))
+      .slice(0, 30);
+  } else {
+    const { data: storedRawItems, error: rawError } = await supabase
+      .from("raw_items")
+      .select("*")
+      .gte("fetched_at", `${date}T00:00:00.000Z`)
+      .order("relevance_score", { ascending: false })
+      .limit(30);
 
-  if (rawError) throw rawError;
+    if (rawError) throw rawError;
+    candidateRawItems = (storedRawItems ?? []) as RawItem[];
+  }
 
-  const dataItems = ((storedRawItems ?? []) as RawItem[])
+  const dataItems = candidateRawItems
     .filter((item) => item.category !== "ai")
     .slice(0, 5);
-  const aiItems = ((storedRawItems ?? []) as RawItem[])
+  const aiItems = candidateRawItems
     .filter((item) => item.category === "ai")
     .slice(0, 5);
 
-  const summarized = await summarizeItems([...dataItems, ...aiItems]);
+  const selectedRawItems = [...dataItems, ...aiItems];
+  const summarizedResult = options.dryRun
+    ? {
+        items: [] as BriefingItem[],
+        generatedCount: 0,
+        tokenEstimate: selectedRawItems.reduce(
+          (sum, item) => sum + estimateTokens(`${item.title} ${item.content ?? ""}`),
+          0
+        )
+      }
+    : await summarizeWithCache(selectedRawItems);
+  const summarized = summarizedResult.items;
   const briefingItems: BriefingItem[] = [
     ...summarized
       .filter((item) => item.section === "data_engineering")
@@ -95,6 +310,31 @@ export async function runDailyIngestion(date = todayIsoDate()) {
     (sum, item) => sum + item.read_time_minutes,
     4
   );
+
+  if (options.dryRun) {
+    if (runRow?.id) {
+      await supabase
+        .from("ingestion_runs")
+        .update({
+          status: "completed",
+          articles_fetched: rawRows.length,
+          articles_deduplicated: articlesDeduplicated,
+          summaries_generated: summarizedResult.generatedCount,
+          token_estimate: summarizedResult.tokenEstimate,
+          completed_at: new Date().toISOString(),
+          notes: { selected_items: selectedRawItems.length }
+        })
+        .eq("id", runRow.id);
+    }
+    return {
+      dry_run: true,
+      articles_fetched: rawRows.length,
+      articles_deduplicated: articlesDeduplicated,
+      selected_items: selectedRawItems.length,
+      summaries_generated: summarizedResult.generatedCount,
+      token_estimate: summarizedResult.tokenEstimate
+    };
+  }
 
   const { data: briefing, error: briefingError } = await supabase
     .from("briefings")
@@ -128,6 +368,10 @@ export async function runDailyIngestion(date = todayIsoDate()) {
         link: item.link,
         category: item.category,
         why_it_matters: item.why_it_matters,
+        detailed_summary: item.detailed_summary,
+        key_takeaways: item.key_takeaways ?? [],
+        related_technologies: item.related_technologies ?? [],
+        published_at: item.published_at,
         read_time_minutes: item.read_time_minutes,
         saved: item.saved
       }))
@@ -144,8 +388,10 @@ export async function runDailyIngestion(date = todayIsoDate()) {
   if (topicsError) throw topicsError;
 
   const topic = selectTopicForDate(topics ?? [], date);
+  let certificationTitle: string | undefined;
   if (topic) {
     const byte = await generateCertificationByte(topic, date);
+    certificationTitle = byte.title;
     const { error } = await supabase.from("certification_bytes").upsert(
       {
         topic_id: byte.topic_id,
@@ -163,6 +409,133 @@ export async function runDailyIngestion(date = todayIsoDate()) {
       { onConflict: "briefing_date" }
     );
     if (error) throw error;
+
+    await supabase
+      .from("certification_topics")
+      .update({
+        viewed_count: ((topic as { viewed_count?: number }).viewed_count ?? 0) + 1,
+        last_viewed_at: new Date().toISOString()
+      })
+      .eq("id", topic.id);
+
+    await supabase.from("certification_topic_progress").upsert(
+      {
+        topic_id: topic.id,
+        viewed_at: new Date().toISOString()
+      },
+      { onConflict: "topic_id" }
+    );
+  }
+
+  const discoveredVideos = await discoverYouTubeVideos();
+  let storedVideos: YouTubeVideo[] = [];
+  if (discoveredVideos.length) {
+    const { data, error } = await supabase
+      .from("youtube_videos")
+      .upsert(
+        discoveredVideos.map((video) => ({
+          video_id: video.video_id,
+          title: video.title,
+          channel: video.channel,
+          channel_id: video.channel_id,
+          thumbnail: video.thumbnail,
+          views: video.views,
+          published_at: video.published_at,
+          description: video.description,
+          url: video.url,
+          query: video.query,
+          score: video.score,
+          score_breakdown: video.score_breakdown ?? {},
+          updated_at: new Date().toISOString()
+        })),
+        { onConflict: "video_id" }
+      )
+      .select("*");
+    if (error) throw error;
+    storedVideos = (data ?? []) as YouTubeVideo[];
+  } else {
+    const { data } = await supabase
+      .from("youtube_videos")
+      .select("*")
+      .order("score", { ascending: false })
+      .limit(3);
+    storedVideos = (data ?? []) as YouTubeVideo[];
+  }
+
+  const topVideos = storedVideos.sort((a, b) => b.score - a.score).slice(0, 3);
+  const videoInsights = await enrichVideoPicks(topVideos, date);
+  await supabase.from("daily_video_picks").delete().eq("briefing_date", date);
+  if (topVideos.length) {
+    const { error } = await supabase.from("daily_video_picks").insert(
+      topVideos.map((video, index) => ({
+        briefing_date: date,
+        video_id: video.id,
+        rank: index + 1,
+        why_useful: videoInsights[index]?.why_useful ?? "Relevant to today’s AI/data briefing.",
+        estimated_value: videoInsights[index]?.estimated_value ?? "Medium"
+      }))
+    );
+    if (error) throw error;
+  }
+
+  const ideas = await generateLinkedInIdeas({
+    date,
+    items: briefingItems,
+    videos: topVideos
+  });
+  await supabase.from("linkedin_ideas").delete().eq("briefing_date", date);
+  if (ideas.length) {
+    const { error } = await supabase.from("linkedin_ideas").insert(
+      ideas.map((idea) => ({
+        briefing_date: date,
+        ...idea
+      }))
+    );
+    if (error) throw error;
+  }
+
+  const videoPickModels = topVideos.map((video, index) => ({
+    id: "",
+    briefing_date: date,
+    rank: index + 1,
+    why_useful: videoInsights[index]?.why_useful ?? "Relevant to today’s AI/data briefing.",
+    estimated_value: videoInsights[index]?.estimated_value ?? "Medium",
+    video
+  })) as DailyVideoPick[];
+
+  const signal = await generateDailySignal({
+    date,
+    dataItems: briefingItems.filter((item) => item.section === "data_engineering"),
+    aiItems: briefingItems.filter((item) => item.section === "ai"),
+    certificationTitle,
+    videos: videoPickModels,
+    linkedinIdeas: ideas.map((idea) => ({ id: "", briefing_date: date, ...idea }))
+  });
+
+  const { error: signalError } = await supabase.from("daily_signals").upsert(
+    {
+      ...signal,
+      updated_at: new Date().toISOString()
+    },
+    { onConflict: "briefing_date" }
+  );
+  if (signalError) throw signalError;
+
+  if (runRow?.id) {
+    await supabase
+      .from("ingestion_runs")
+      .update({
+        status: "completed",
+        articles_fetched: rawRows.length,
+        articles_deduplicated: articlesDeduplicated,
+        summaries_generated: summarizedResult.generatedCount,
+        videos_fetched: discoveredVideos.length,
+        videos_selected: topVideos.length,
+        token_estimate: summarizedResult.tokenEstimate,
+        completed_at: new Date().toISOString(),
+        notes: { selected_items: selectedRawItems.length, youtube_enabled: Boolean(process.env.YOUTUBE_API_KEY) }
+      })
+      .eq("id", runRow.id);
   }
 
   return getTodayBriefing();

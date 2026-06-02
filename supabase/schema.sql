@@ -91,6 +91,8 @@ create table if not exists feedback (
   created_at timestamptz not null default now()
 );
 
+-- Additive intelligence-dashboard schema is maintained in supabase/intelligence_upgrade.sql.
+
 alter table sources enable row level security;
 alter table raw_items enable row level security;
 alter table briefings enable row level security;
