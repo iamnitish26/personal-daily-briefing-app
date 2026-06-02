@@ -1,6 +1,10 @@
 import { BriefingSection } from "@/components/BriefingSection";
 import { CertificationByteCard } from "@/components/CertificationByteCard";
+import { LinkedInIdeasSection } from "@/components/LinkedInIdeasSection";
 import { Nav } from "@/components/Nav";
+import { SignalExtras } from "@/components/SignalExtras";
+import { TodaySignal } from "@/components/TodaySignal";
+import { VideoPicksSection } from "@/components/VideoPicksSection";
 import { formatBriefingDate } from "@/lib/date";
 import { getTodayBriefing } from "@/lib/briefing";
 
@@ -26,26 +30,36 @@ export default async function HomePage() {
       <main className="mx-auto w-full max-w-6xl overflow-hidden px-4 pb-16 sm:px-6">
         <section className="grid min-w-0 grid-cols-1 gap-6 py-8 sm:py-10 lg:grid-cols-[1.4fr_0.6fr] lg:items-end">
           <div className="min-w-0">
-            <p className="text-sm font-bold uppercase tracking-[0.14em] text-gold sm:tracking-[0.18em]">
+            <p className="text-sm font-bold uppercase tracking-[0.14em] text-gold dark:text-amber-300 sm:tracking-[0.18em]">
               {briefing ? formatBriefingDate(briefing.briefing_date) : "Today"}
             </p>
-            <h1 className="mt-3 max-w-3xl [overflow-wrap:anywhere] text-4xl font-black leading-tight text-ink sm:text-6xl">
+            <h1 className="mt-3 max-w-3xl [overflow-wrap:anywhere] text-4xl font-black leading-tight text-ink dark:text-white sm:text-6xl">
               {briefing?.title ?? "Morning Data Briefing"}
             </h1>
-            <p className="mt-5 max-w-2xl [overflow-wrap:anywhere] text-base leading-7 text-ink/70">
+            <p className="mt-5 max-w-2xl [overflow-wrap:anywhere] text-base leading-7 text-ink/70 dark:text-white/70">
               {briefing?.intro ??
                 "Run the daily ingestion job to create your first focused briefing."}
             </p>
           </div>
-          <div className="min-w-0 rounded-lg border border-ink/10 bg-white/75 p-4 shadow-soft sm:p-5">
-            <div className="text-sm font-bold uppercase tracking-[0.14em] text-fern sm:tracking-[0.16em]">
-              Read Time
+          <div className="min-w-0 rounded-lg border border-ink/10 bg-white/75 p-4 shadow-soft dark:border-white/10 dark:bg-white/[0.06] sm:p-5">
+            <div className="flex min-w-0 items-end justify-between gap-4">
+              <div>
+                <div className="text-sm font-bold uppercase tracking-[0.14em] text-fern dark:text-emerald-300 sm:tracking-[0.16em]">
+                  Briefing time
+                </div>
+                <div className="mt-2 text-4xl font-black text-ink dark:text-white">
+                  {briefing?.total_read_time_minutes ?? 0} min
+                </div>
+              </div>
+              {briefing?.latest_ingestion_run ? (
+                <div className="text-right text-xs text-ink/45 dark:text-white/45">
+                  <div>{briefing.latest_ingestion_run.summaries_generated} new summaries</div>
+                  <div>{briefing.latest_ingestion_run.videos_selected} videos selected</div>
+                </div>
+              ) : null}
             </div>
-            <div className="mt-2 text-4xl font-black text-ink">
-              {briefing?.total_read_time_minutes ?? 0} min
-            </div>
-            <p className="mt-2 text-sm leading-6 text-ink/60">
-              Data engineering, AI, and one certification rep for the morning.
+            <p className="mt-2 text-sm leading-6 text-ink/60 dark:text-white/60">
+              Data engineering, AI, certification, and content signals for the morning.
             </p>
           </div>
         </section>
@@ -69,10 +83,19 @@ export default async function HomePage() {
           </div>
         ) : (
           <>
+            <TodaySignal signal={briefing.daily_signal} />
+            <VideoPicksSection videos={briefing.video_picks ?? []} />
             <BriefingSection title="Top 5 Data Engineering Updates" items={dataItems} />
             <BriefingSection title="Top 5 AI Updates" items={aiItems} />
             {briefing.certification_byte ? (
               <CertificationByteCard byte={briefing.certification_byte} />
+            ) : null}
+            <LinkedInIdeasSection ideas={briefing.linkedin_ideas ?? []} />
+            {briefing.daily_signal ? (
+              <SignalExtras
+                whatToTry={briefing.daily_signal.what_to_try}
+                emergingSignals={briefing.daily_signal.emerging_signals}
+              />
             ) : null}
           </>
         )}

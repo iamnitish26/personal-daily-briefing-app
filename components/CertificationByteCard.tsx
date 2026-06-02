@@ -2,7 +2,7 @@ import type { CertificationByte } from "@/lib/types";
 
 export function CertificationByteCard({ byte }: { byte: CertificationByte }) {
   return (
-    <section className="mt-8 min-w-0 overflow-hidden rounded-lg border border-fern/20 bg-fern p-4 text-white shadow-soft sm:p-6">
+    <section className="mt-8 min-w-0 overflow-hidden rounded-lg border border-fern/20 bg-fern p-4 text-white shadow-soft dark:border-emerald-300/20 dark:bg-emerald-950/80 sm:p-6">
       <div className="mb-2 min-w-0 text-xs font-bold uppercase tracking-[0.1em] text-white/70 sm:tracking-[0.16em]">
         Databricks Certification Byte / {byte.level}
       </div>

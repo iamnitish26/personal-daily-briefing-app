@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
   background: #f5f7f2;
 }
 
@@ -27,4 +27,17 @@ body {
 
 a {
   text-underline-offset: 3px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    background: #0d1117;
+  }
+
+  body {
+    background:
+      radial-gradient(circle at top left, rgba(54, 107, 91, 0.22), transparent 30rem),
+      linear-gradient(180deg, #0d1117 0%, #121821 100%);
+    color: #f7faf7;
+  }
 }
