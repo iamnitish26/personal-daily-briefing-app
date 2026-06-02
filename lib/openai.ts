@@ -37,7 +37,7 @@ function stringArray(value: unknown): string[] {
 }
 
 function signalCard(value: unknown, fallback: DailySignal["most_important_ai"]) {
-  if (!value || typeof value !== "object") return fallback;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return fallback;
   const candidate = value as Partial<DailySignal["most_important_ai"]>;
   return {
     ...fallback,
@@ -45,6 +45,39 @@ function signalCard(value: unknown, fallback: DailySignal["most_important_ai"]) 
     title: candidate.title || fallback.title,
     summary: candidate.summary || fallback.summary
   };
+}
+
+function normalizeEmergingSignals(
+  value: unknown,
+  fallback: DailySignal["emerging_signals"]
+) {
+  const categories = new Set(["ai", "data_engineering", "certification", "community"]);
+  const momentumValues = new Set(["High", "Medium", "Low"]);
+
+  if (!Array.isArray(value)) return fallback;
+
+  const signals = value
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+    .map((item) => ({
+      topic:
+        (typeof item.topic === "string" && item.topic) ||
+        (typeof item.title === "string" && item.title) ||
+        "Emerging signal",
+      category:
+        typeof item.category === "string" && categories.has(item.category)
+          ? (item.category as DailySignal["emerging_signals"][number]["category"])
+          : "community",
+      evidence: stringArray(item.evidence).length
+        ? stringArray(item.evidence)
+        : [typeof item.summary === "string" ? item.summary : "Repeated in today’s briefing."],
+      momentum:
+        typeof item.momentum === "string" && momentumValues.has(item.momentum)
+          ? (item.momentum as DailySignal["emerging_signals"][number]["momentum"])
+          : "Medium"
+    }))
+    .slice(0, 5);
+
+  return signals.length ? signals : fallback;
 }
 
 function normalizeTryToday(value: unknown, fallback: DailySignal["what_to_try"]) {
@@ -296,9 +329,10 @@ export async function generateDailySignal(args: {
       fallback.linkedin_opportunity
     ),
     what_to_try: normalizeTryToday(parsed.what_to_try, fallback.what_to_try),
-    emerging_signals: Array.isArray(parsed.emerging_signals)
-      ? parsed.emerging_signals.slice(0, 5)
-      : fallback.emerging_signals
+    emerging_signals: normalizeEmergingSignals(
+      parsed.emerging_signals,
+      fallback.emerging_signals
+    )
   };
 }
 
