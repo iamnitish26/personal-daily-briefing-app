@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { runDailyIngestion } from "@/lib/briefing";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 function isAuthorized(request: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
