@@ -28,6 +28,16 @@ type IngestionOptions = {
   mode?: string;
 };
 
+type RecentBriefingItem = {
+  title: string;
+  link: string;
+  section: BriefingItem["section"];
+};
+
+const RECENT_ITEM_LOOKBACK_DAYS = 7;
+const CANDIDATE_POOL_SIZE = 80;
+const SECTION_ITEM_LIMIT = 5;
+
 function normalizeStringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string")
@@ -36,6 +46,87 @@ function normalizeStringArray(value: unknown): string[] {
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
+}
+
+function dateDaysBefore(date: string, days: number): string {
+  const current = new Date(`${date}T00:00:00.000Z`);
+  current.setUTCDate(current.getUTCDate() - days);
+  return current.toISOString().slice(0, 10);
+}
+
+function normalizeComparableUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.hash = "";
+    parsed.search = "";
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    return url.trim().toLowerCase();
+  }
+}
+
+function topicSignature(title: string): string {
+  const normalized = title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const hasDatabricks = normalized.includes("databricks");
+  const hasSnowflake = normalized.includes("snowflake");
+  const hasFivetran = normalized.includes("fivetran");
+  const hasDbt = /\bdbt\b/.test(normalized);
+
+  if (hasFivetran && hasDbt && /\b(merger|merge|merged|acquisition|acquire)\b/.test(normalized)) {
+    return "fivetran-dbt-merger";
+  }
+
+  if (
+    hasDatabricks &&
+    hasSnowflake &&
+    /\b(vs|versus|compare|comparison|showdown|weekly|better|which)\b/.test(normalized)
+  ) {
+    return "databricks-snowflake-comparison";
+  }
+
+  return normalized
+    .split(/\s+/)
+    .filter((word) => word.length > 3)
+    .slice(0, 8)
+    .join("-");
+}
+
+function selectFreshItems(
+  candidates: RawItem[],
+  section: BriefingItem["section"],
+  recentItems: RecentBriefingItem[],
+  limit = SECTION_ITEM_LIMIT
+): RawItem[] {
+  const sectionRecentItems = recentItems.filter((item) => item.section === section);
+  const recentLinks = new Set(sectionRecentItems.map((item) => normalizeComparableUrl(item.link)));
+  const recentTopicCounts = new Map<string, number>();
+
+  for (const item of sectionRecentItems) {
+    const signature = topicSignature(item.title);
+    recentTopicCounts.set(signature, (recentTopicCounts.get(signature) ?? 0) + 1);
+  }
+
+  const scored = candidates.map((item) => {
+    const exactRepeatPenalty = recentLinks.has(normalizeComparableUrl(item.url)) ? 1000 : 0;
+    const recentTopicPenalty = (recentTopicCounts.get(topicSignature(item.title)) ?? 0) * 8;
+    return {
+      item,
+      freshnessScore: (item.relevance_score ?? 0) - exactRepeatPenalty - recentTopicPenalty
+    };
+  });
+
+  const selected: RawItem[] = [];
+  const selectedTopics = new Set<string>();
+
+  for (const candidate of scored.sort((a, b) => b.freshnessScore - a.freshnessScore)) {
+    const signature = topicSignature(candidate.item.title);
+    if (selectedTopics.has(signature) && selected.length < limit) continue;
+    selected.push(candidate.item);
+    selectedTopics.add(signature);
+    if (selected.length === limit) break;
+  }
+
+  return selected;
 }
 
 export async function getTodayBriefing(): Promise<DailyBriefing | null> {
@@ -272,18 +363,36 @@ export async function runDailyIngestion(options: IngestionOptions = {}) {
       .select("*")
       .gte("fetched_at", `${date}T00:00:00.000Z`)
       .order("relevance_score", { ascending: false })
-      .limit(30);
+      .limit(CANDIDATE_POOL_SIZE);
 
     if (rawError) throw rawError;
     candidateRawItems = (storedRawItems ?? []) as RawItem[];
   }
 
-  const dataItems = candidateRawItems
-    .filter((item) => item.category !== "ai")
-    .slice(0, 5);
-  const aiItems = candidateRawItems
-    .filter((item) => item.category === "ai")
-    .slice(0, 5);
+  let recentBriefingItems: RecentBriefingItem[] = [];
+  if (!options.dryRun) {
+    const { data: recentRows, error: recentError } = await supabase
+      .from("briefing_items")
+      .select("title, link, section, briefings!inner(briefing_date)")
+      .gte("briefings.briefing_date", dateDaysBefore(date, RECENT_ITEM_LOOKBACK_DAYS))
+      .lt("briefings.briefing_date", date);
+
+    if (recentError) throw recentError;
+    recentBriefingItems = ((recentRows ?? []) as Array<{
+      title: string;
+      link: string;
+      section: BriefingItem["section"];
+    }>).map((item) => ({
+      title: item.title,
+      link: item.link,
+      section: item.section
+    }));
+  }
+
+  const dataCandidates = candidateRawItems.filter((item) => item.category !== "ai");
+  const aiCandidates = candidateRawItems.filter((item) => item.category === "ai");
+  const dataItems = selectFreshItems(dataCandidates, "data_engineering", recentBriefingItems);
+  const aiItems = selectFreshItems(aiCandidates, "ai", recentBriefingItems);
 
   const selectedRawItems = [...dataItems, ...aiItems];
   const summarizedResult = options.dryRun
