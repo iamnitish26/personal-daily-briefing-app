@@ -8,7 +8,7 @@ A focused morning intelligence dashboard for data engineering news, AI and agent
 - Tailwind CSS
 - Supabase Postgres
 - Vercel Cron
-- OpenAI API for summarisation and certification-byte generation
+- OpenAI API for summarisation, certification-byte generation, and daily quiz generation
 - YouTube Data API for limited daily video discovery
 
 ## Architecture
@@ -80,7 +80,8 @@ curl -X POST "http://localhost:3000/api/ingest/run?dryRun=true" \
 - `POST /api/ingest/run` fetches sources, deduplicates, scores, summarises, and stores a briefing.
 - `POST /api/ingest/run?dryRun=true` estimates the run without OpenAI generation.
 - `POST /api/ingest/run?force=true` regenerates today’s stored dashboard.
-- `GET /api/certification/today` returns today’s certification byte.
+- `GET /api/certification/today` returns today’s certification byte and sanitized quiz questions.
+- `POST /api/certification/quiz/submit` scores a quiz attempt and returns answer review, strengths, and weaknesses.
 - `POST /api/feedback` records `more_like_this`, `less_like_this`, or `save`.
 - `GET /api/saved` returns saved briefing items.
 
@@ -109,7 +110,7 @@ The dashboard stores richer daily intelligence instead of generating it live on 
 - `youtube_videos` and `daily_video_picks` store limited YouTube discovery results and the top three daily picks.
 - `linkedin_ideas` stores three content opportunities: AI, data engineering, and engineering career.
 - `ingestion_runs` stores safe counts for fetched articles, selected videos, generated summaries, dry-run status, and token estimates.
-- Certification progress is additive through topic counters, saved flags, weak-area flags, and a revision queue.
+- Certification progress is additive through topic counters, saved flags, weak-area flags, a revision queue, daily 10-question quizzes, and quiz attempts.
 
 ## Database Changes
 
@@ -122,8 +123,13 @@ Apply `supabase/intelligence_upgrade.sql` after the base schema and seed data. T
 - `linkedin_ideas`
 - `ingestion_runs`
 - `certification_topic_progress`
+- `certification_quizzes`
+- `certification_quiz_questions`
+- `certification_quiz_attempts`
 - New columns on `briefing_items` for detailed summaries, key takeaways, related technologies, and published dates
 - New progress columns on `certification_topics`
+
+Apply `supabase/certification_quiz_upgrade.sql` to add the daily quiz tables. Quiz rows are protected by RLS without public-read policies; server routes use the Supabase service role and only send sanitized question prompts to the browser before submission.
 
 ## Cost Controls
 
@@ -150,7 +156,7 @@ Expected daily API cost should remain low for personal use because only selected
 - Source ingestion supports RSS feeds and static URLs.
 - Similar story deduplication is intentionally simple and hash-based for now.
 - Relevance scoring uses the hardcoded interest profile in `lib/preferences.ts`.
-- If `OPENAI_API_KEY` is missing, ingestion still stores fallback summaries and certification bytes for development.
+- If `OPENAI_API_KEY` is missing, ingestion still stores fallback summaries, certification bytes, and quiz questions for development.
 - If `YOUTUBE_API_KEY` is missing, the app skips YouTube discovery and uses any previously stored picks.
 - Feedback is stored immediately; only `save` currently changes item state.
 - LinkedIn ideas are content opportunities only; the app does not scrape LinkedIn or generate full posts.

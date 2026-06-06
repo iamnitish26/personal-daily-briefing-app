@@ -67,6 +67,60 @@ export type CertificationByte = {
   answer_explanation: string;
 };
 
+export type CertificationQuizQuestion = {
+  id: string;
+  quiz_id: string;
+  topic_id?: string | null;
+  rank: number;
+  level: "associate" | "professional";
+  domain: string;
+  question: string;
+  choices: string[];
+  answer: string;
+  answer_explanation: string;
+};
+
+export type CertificationQuizPromptQuestion = Omit<
+  CertificationQuizQuestion,
+  "answer" | "answer_explanation"
+>;
+
+export type CertificationQuiz = {
+  id: string;
+  briefing_date: string;
+  title: string;
+  focus: string;
+  created_at?: string;
+  questions: CertificationQuizPromptQuestion[];
+};
+
+export type StoredCertificationQuiz = Omit<CertificationQuiz, "questions"> & {
+  questions: CertificationQuizQuestion[];
+};
+
+export type CertificationQuizAnswerReview = {
+  question_id: string;
+  selected_answer?: string | null;
+  correct_answer: string;
+  is_correct: boolean;
+  explanation: string;
+  domain: string;
+  level: "associate" | "professional";
+};
+
+export type CertificationQuizAttempt = {
+  id: string;
+  quiz_id: string;
+  briefing_date: string;
+  score: number;
+  total_questions: number;
+  strengths: string[];
+  weaknesses: string[];
+  answers: Record<string, string>;
+  review: CertificationQuizAnswerReview[];
+  created_at: string;
+};
+
 export type SignalCard = {
   title: string;
   summary: string;

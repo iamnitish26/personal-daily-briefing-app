@@ -186,6 +186,15 @@ Each daily byte should include:
 * Correct answer
 * Explanation
 
+Each daily quiz should include:
+
+* 10 multiple-choice questions.
+* Databricks Data Engineer Associate questions first.
+* Databricks Data Engineer Professional stretch questions where useful.
+* Clickable answers in the UI.
+* Score, strengths, weaknesses, and answer review after submission.
+* Server-side scoring so answer keys are not exposed to the browser before submission.
+
 Prioritise topics such as:
 
 * Delta Lake

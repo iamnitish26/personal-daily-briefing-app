@@ -1,7 +1,16 @@
 import { CertificationByteCard } from "@/components/CertificationByteCard";
+import { CertificationQuiz } from "@/components/CertificationQuiz";
 import { Nav } from "@/components/Nav";
+import {
+  normalizeQuizAttempt,
+  normalizeStoredQuiz,
+  sanitizeQuizForClient
+} from "@/lib/certification-quiz";
 import { getSupabaseServiceClient } from "@/lib/supabase";
-import type { CertificationByte, CertificationTopicProgress } from "@/lib/types";
+import type {
+  CertificationByte,
+  CertificationTopicProgress
+} from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -17,8 +26,25 @@ export default async function CertificationArchivePage() {
     .select("id,title,level,domain,viewed_count,saved,weak_area,last_viewed_at")
     .eq("enabled", true)
     .order("order_index");
+  const { data: todayQuizData } = await supabase
+    .from("certification_quizzes")
+    .select("*, questions:certification_quiz_questions(*)")
+    .order("briefing_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const { data: latestAttemptData } = todayQuizData?.id
+    ? await supabase
+        .from("certification_quiz_attempts")
+        .select("*")
+        .eq("quiz_id", todayQuizData.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    : { data: null };
 
   const bytes = (data ?? []) as CertificationByte[];
+  const todayQuiz = sanitizeQuizForClient(normalizeStoredQuiz(todayQuizData));
+  const latestAttempt = normalizeQuizAttempt(latestAttemptData);
   const topics = (topicData ?? []) as CertificationTopicProgress[];
   const viewedTopics = topics.filter((topic) => topic.viewed_count > 0);
   const savedTopics = topics.filter((topic) => topic.saved);
@@ -57,6 +83,7 @@ export default async function CertificationArchivePage() {
             </div>
           ))}
         </section>
+        <CertificationQuiz quiz={todayQuiz} latestAttempt={latestAttempt} />
         <section className="mt-6 rounded-lg border border-ink/10 bg-white/85 p-4 shadow-soft dark:border-white/10 dark:bg-white/[0.06] sm:p-5">
           <div className="flex flex-wrap items-end justify-between gap-2">
             <h2 className="text-xl font-bold text-ink dark:text-white">Revision Queue</h2>

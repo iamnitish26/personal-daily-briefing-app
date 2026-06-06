@@ -17,7 +17,11 @@ import {
   generateLinkedInIdeas,
   summarizeItems
 } from "@/lib/openai";
-import { generateCertificationByte, selectTopicForDate } from "@/lib/certification";
+import {
+  generateCertificationByte,
+  generateCertificationQuiz,
+  selectTopicForDate
+} from "@/lib/certification";
 import { getSupabaseAnonClient, getSupabaseServiceClient } from "@/lib/supabase";
 import { discoverYouTubeVideos } from "@/lib/youtube";
 
@@ -591,6 +595,44 @@ export async function runDailyIngestion(options: IngestionOptions = {}) {
       },
       { onConflict: "topic_id" }
     );
+  }
+
+  if ((topics ?? []).length) {
+    const quiz = await generateCertificationQuiz(topics ?? [], date);
+    const { data: quizRow, error: quizError } = await supabase
+      .from("certification_quizzes")
+      .upsert(
+        {
+          briefing_date: date,
+          title: quiz.title,
+          focus: quiz.focus
+        },
+        { onConflict: "briefing_date" }
+      )
+      .select()
+      .single();
+
+    if (quizError) throw quizError;
+
+    await supabase.from("certification_quiz_questions").delete().eq("quiz_id", quizRow.id);
+
+    const { error: questionsError } = await supabase
+      .from("certification_quiz_questions")
+      .insert(
+        quiz.questions.map((question) => ({
+          quiz_id: quizRow.id,
+          topic_id: question.topic_id,
+          rank: question.rank,
+          level: question.level,
+          domain: question.domain,
+          question: question.question,
+          choices: question.choices,
+          answer: question.answer,
+          answer_explanation: question.answer_explanation
+        }))
+      );
+
+    if (questionsError) throw questionsError;
   }
 
   const discoveredVideos = await discoverYouTubeVideos();
