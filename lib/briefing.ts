@@ -428,12 +428,15 @@ export async function runDailyIngestion(options: IngestionOptions = {}) {
   }
 
   const discoveredVideos = await discoverYouTubeVideos();
+  const uniqueDiscoveredVideos = Array.from(
+    new Map(discoveredVideos.map((video) => [video.video_id, video])).values()
+  );
   let storedVideos: YouTubeVideo[] = [];
-  if (discoveredVideos.length) {
+  if (uniqueDiscoveredVideos.length) {
     const { data, error } = await supabase
       .from("youtube_videos")
       .upsert(
-        discoveredVideos.map((video) => ({
+        uniqueDiscoveredVideos.map((video) => ({
           video_id: video.video_id,
           title: video.title,
           channel: video.channel,
