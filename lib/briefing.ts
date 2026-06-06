@@ -91,6 +91,50 @@ function topicSignature(title: string): string {
     .join("-");
 }
 
+function topicTokens(title: string): Set<string> {
+  const stopWords = new Set([
+    "about",
+    "after",
+    "already",
+    "better",
+    "build",
+    "from",
+    "into",
+    "that",
+    "their",
+    "this",
+    "using",
+    "what",
+    "with",
+    "your"
+  ]);
+
+  return new Set(
+    title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .split(/\s+/)
+      .filter((word) => word.length > 3 && !stopWords.has(word))
+  );
+}
+
+function topicSimilarity(left: string, right: string): number {
+  const leftTokens = topicTokens(left);
+  const rightTokens = topicTokens(right);
+  if (!leftTokens.size || !rightTokens.size) return 0;
+
+  let overlap = 0;
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) overlap += 1;
+  }
+
+  return overlap / Math.min(leftTokens.size, rightTokens.size);
+}
+
+function hasSimilarTopic(title: string, otherTitles: string[]): boolean {
+  return otherTitles.some((otherTitle) => topicSimilarity(title, otherTitle) >= 0.5);
+}
+
 function selectFreshItems(
   candidates: RawItem[],
   section: BriefingItem["section"],
@@ -109,20 +153,33 @@ function selectFreshItems(
   const scored = candidates.map((item) => {
     const exactRepeatPenalty = recentLinks.has(normalizeComparableUrl(item.url)) ? 1000 : 0;
     const recentTopicPenalty = (recentTopicCounts.get(topicSignature(item.title)) ?? 0) * 8;
+    const similarRecentTopicPenalty = hasSimilarTopic(
+      item.title,
+      sectionRecentItems.map((recentItem) => recentItem.title)
+    )
+      ? 6
+      : 0;
     return {
       item,
-      freshnessScore: (item.relevance_score ?? 0) - exactRepeatPenalty - recentTopicPenalty
+      freshnessScore:
+        (item.relevance_score ?? 0) -
+        exactRepeatPenalty -
+        recentTopicPenalty -
+        similarRecentTopicPenalty
     };
   });
 
   const selected: RawItem[] = [];
   const selectedTopics = new Set<string>();
+  const selectedTitles: string[] = [];
 
   for (const candidate of scored.sort((a, b) => b.freshnessScore - a.freshnessScore)) {
     const signature = topicSignature(candidate.item.title);
     if (selectedTopics.has(signature) && selected.length < limit) continue;
+    if (hasSimilarTopic(candidate.item.title, selectedTitles) && selected.length < limit) continue;
     selected.push(candidate.item);
     selectedTopics.add(signature);
+    selectedTitles.push(candidate.item.title);
     if (selected.length === limit) break;
   }
 
