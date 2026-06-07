@@ -821,7 +821,15 @@ export async function runDailyIngestion(options: IngestionOptions = {}) {
 
   const { error: focusError } = await supabase.from("daily_focus").upsert(
     {
-      ...actionIntelligence.daily_focus,
+      briefing_date: date,
+      theme: actionIntelligence.daily_focus.theme,
+      read_item: actionIntelligence.daily_focus.read_item,
+      watch_item: actionIntelligence.daily_focus.watch_item,
+      learn_item: actionIntelligence.daily_focus.learn_item,
+      post_item: actionIntelligence.daily_focus.post_item,
+      try_item: actionIntelligence.daily_focus.try_item,
+      estimated_total_minutes: actionIntelligence.daily_focus.estimated_total_minutes,
+      why_selected: actionIntelligence.daily_focus.why_selected,
       updated_at: new Date().toISOString()
     },
     { onConflict: "briefing_date" }
@@ -830,7 +838,13 @@ export async function runDailyIngestion(options: IngestionOptions = {}) {
 
   const { error: ctoError } = await supabase.from("cto_briefings").upsert(
     {
-      ...actionIntelligence.cto_briefing,
+      briefing_date: date,
+      what_matters: actionIntelligence.cto_briefing.what_matters,
+      why_it_matters: actionIntelligence.cto_briefing.why_it_matters,
+      should_care: actionIntelligence.cto_briefing.should_care,
+      practical_action: actionIntelligence.cto_briefing.practical_action,
+      related_technologies: actionIntelligence.cto_briefing.related_technologies,
+      expected_impact: actionIntelligence.cto_briefing.expected_impact,
       updated_at: new Date().toISOString()
     },
     { onConflict: "briefing_date" }
@@ -842,7 +856,13 @@ export async function runDailyIngestion(options: IngestionOptions = {}) {
     const { error } = await supabase.from("content_opportunities").insert(
       actionIntelligence.content_opportunities.map((opportunity) => ({
         briefing_date: date,
-        ...opportunity
+        opportunity_type: opportunity.opportunity_type,
+        topic: opportunity.topic,
+        why_relevant_now: opportunity.why_relevant_now,
+        source_links: opportunity.source_links,
+        talking_points: opportunity.talking_points,
+        personal_angle: opportunity.personal_angle,
+        opportunity_score: opportunity.opportunity_score
       }))
     );
     if (error) throw error;
@@ -853,7 +873,11 @@ export async function runDailyIngestion(options: IngestionOptions = {}) {
     const { error } = await supabase.from("career_radar").insert(
       actionIntelligence.career_radar.map((item) => ({
         briefing_date: date,
-        ...item
+        topic: item.topic,
+        momentum_score: item.momentum_score,
+        why_growing: item.why_growing,
+        relevance_to_data_engineer: item.relevance_to_data_engineer,
+        suggested_learning_action: item.suggested_learning_action
       }))
     );
     if (error) throw error;
@@ -864,7 +888,11 @@ export async function runDailyIngestion(options: IngestionOptions = {}) {
     const { error } = await supabase.from("tool_recommendations").insert(
       actionIntelligence.tool_recommendations.map((item) => ({
         briefing_date: date,
-        ...item
+        tool_name: item.tool_name,
+        what_it_does: item.what_it_does,
+        why_it_matters: item.why_it_matters,
+        trial_step: item.trial_step,
+        source_link: item.source_link ?? null
       }))
     );
     if (error) throw error;
@@ -906,7 +934,17 @@ export async function runDailyIngestion(options: IngestionOptions = {}) {
 
     const { error } = await supabase.from("weekly_reports").upsert(
       {
-        ...weeklyReport,
+        week_start: weeklyReport.week_start,
+        week_end: weeklyReport.week_end,
+        biggest_ai_development: weeklyReport.biggest_ai_development,
+        biggest_data_engineering_development:
+          weeklyReport.biggest_data_engineering_development,
+        biggest_databricks_update: weeklyReport.biggest_databricks_update,
+        most_discussed_trend: weeklyReport.most_discussed_trend,
+        top_video: weeklyReport.top_video,
+        best_content_opportunity: weeklyReport.best_content_opportunity,
+        certification_topics_covered: weeklyReport.certification_topics_covered,
+        recommended_focus_next_week: weeklyReport.recommended_focus_next_week,
         updated_at: new Date().toISOString()
       },
       { onConflict: "week_end" }
