@@ -868,10 +868,13 @@ export async function runDailyIngestion(options: IngestionOptions = {}) {
     if (error) throw error;
   }
 
+  const uniqueCareerRadar = Array.from(
+    new Map(actionIntelligence.career_radar.map((item) => [item.topic.toLowerCase(), item])).values()
+  );
   await supabase.from("career_radar").delete().eq("briefing_date", date);
-  if (actionIntelligence.career_radar.length) {
+  if (uniqueCareerRadar.length) {
     const { error } = await supabase.from("career_radar").insert(
-      actionIntelligence.career_radar.map((item) => ({
+      uniqueCareerRadar.map((item) => ({
         briefing_date: date,
         topic: item.topic,
         momentum_score: item.momentum_score,
@@ -883,10 +886,18 @@ export async function runDailyIngestion(options: IngestionOptions = {}) {
     if (error) throw error;
   }
 
+  const uniqueToolRecommendations = Array.from(
+    new Map(
+      actionIntelligence.tool_recommendations.map((item) => [
+        item.tool_name.toLowerCase(),
+        item
+      ])
+    ).values()
+  );
   await supabase.from("tool_recommendations").delete().eq("briefing_date", date);
-  if (actionIntelligence.tool_recommendations.length) {
+  if (uniqueToolRecommendations.length) {
     const { error } = await supabase.from("tool_recommendations").insert(
-      actionIntelligence.tool_recommendations.map((item) => ({
+      uniqueToolRecommendations.map((item) => ({
         briefing_date: date,
         tool_name: item.tool_name,
         what_it_does: item.what_it_does,
