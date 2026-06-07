@@ -1,6 +1,12 @@
+import {
+  CareerRadarSection,
+  ContentOpportunitiesSection,
+  CTOBriefingCard,
+  TodayFocusCard,
+  ToolRecommendationsSection
+} from "@/components/ActionIntelligence";
 import { BriefingSection } from "@/components/BriefingSection";
 import { CertificationByteCard } from "@/components/CertificationByteCard";
-import { LinkedInIdeasSection } from "@/components/LinkedInIdeasSection";
 import { Nav } from "@/components/Nav";
 import { SignalExtras } from "@/components/SignalExtras";
 import { TodaySignal } from "@/components/TodaySignal";
@@ -83,14 +89,18 @@ export default async function HomePage() {
           </div>
         ) : (
           <>
+            <TodayFocusCard focus={briefing.daily_focus} />
+            <CTOBriefingCard briefing={briefing.cto_briefing} />
             <TodaySignal signal={briefing.daily_signal} />
+            <ToolRecommendationsSection items={briefing.tool_recommendations ?? []} />
             <VideoPicksSection videos={briefing.video_picks ?? []} />
             <BriefingSection title="Top 5 Data Engineering Updates" items={dataItems} />
             <BriefingSection title="Top 5 AI Updates" items={aiItems} />
             {briefing.certification_byte ? (
               <CertificationByteCard byte={briefing.certification_byte} />
             ) : null}
-            <LinkedInIdeasSection ideas={briefing.linkedin_ideas ?? []} />
+            <ContentOpportunitiesSection opportunities={briefing.content_opportunities ?? []} />
+            <CareerRadarSection items={briefing.career_radar ?? []} />
             {briefing.daily_signal ? (
               <SignalExtras
                 whatToTry={briefing.daily_signal.what_to_try}

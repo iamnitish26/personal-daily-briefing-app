@@ -89,6 +89,16 @@ export function BriefingCard({ item }: { item: BriefingItem }) {
                 {item.why_it_matters}
               </p>
             </div>
+            {item.suggested_action ? (
+              <div>
+                <div className="text-xs font-bold uppercase tracking-[0.14em] text-gold dark:text-amber-300">
+                  Suggested Action
+                </div>
+                <p className="mt-2 min-w-0 [overflow-wrap:anywhere] rounded-md bg-cloud/70 p-3 text-sm leading-6 text-ink/75 dark:bg-white/10 dark:text-white/75">
+                  {item.suggested_action}
+                </p>
+              </div>
+            ) : null}
             {technologies.length ? (
               <div className="flex min-w-0 flex-wrap gap-2">
                 {technologies.map((technology) => (

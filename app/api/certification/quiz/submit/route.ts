@@ -120,6 +120,63 @@ export async function POST(request: NextRequest) {
         .in("id", weakTopicIds);
     }
 
+    const topicIds = questions
+      .map((question) => question.topic_id)
+      .filter((topicId): topicId is string => Boolean(topicId));
+
+    if (topicIds.length) {
+      const { data: topics } = await supabase
+        .from("certification_topics")
+        .select("id,title,level,domain")
+        .in("id", topicIds);
+      const topicRows = topics ?? [];
+      const reviewByTopic = new Map(
+        questions
+          .filter((question) => question.topic_id)
+          .map((question) => [
+            question.topic_id,
+            review.find((item) => item.question_id === question.id)
+          ])
+      );
+
+      await supabase.from("certification_progress").upsert(
+        topicRows.map((topic) => {
+          const topicReview = reviewByTopic.get(topic.id);
+          const correct = Boolean(topicReview?.is_correct);
+          return {
+            topic_id: topic.id,
+            topic: topic.title,
+            level: topic.level,
+            domain: topic.domain,
+            attempts: 1,
+            correct_attempts: correct ? 1 : 0,
+            weak_area: !correct,
+            next_review_at: new Date(
+              Date.now() + (correct ? 7 : 2) * 24 * 60 * 60 * 1000
+            ).toISOString(),
+            updated_at: new Date().toISOString()
+          };
+        }),
+        { onConflict: "topic_id" }
+      );
+
+      const weakTopics = topicRows.filter((topic) => weakTopicIds.includes(topic.id));
+      if (weakTopics.length) {
+        await supabase.from("revision_queue").upsert(
+          weakTopics.map((topic) => ({
+            topic_id: topic.id,
+            topic: topic.title,
+            level: topic.level,
+            reason: "Missed in the latest daily quiz attempt",
+            priority: 1,
+            due_at: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+            completed_at: null
+          })),
+          { onConflict: "topic_id" }
+        );
+      }
+    }
+
     return NextResponse.json({ attempt });
   } catch (error) {
     return NextResponse.json(

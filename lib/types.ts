@@ -44,12 +44,37 @@ export type BriefingItem = {
   link: string;
   category: string;
   why_it_matters: string;
+  suggested_action?: string | null;
   detailed_summary?: string | null;
   key_takeaways?: string[];
   related_technologies?: string[];
   published_at?: string | null;
   read_time_minutes: number;
   saved?: boolean;
+};
+
+export type DailyFocus = {
+  id: string;
+  briefing_date: string;
+  theme: string;
+  read_item: SignalCard;
+  watch_item: SignalCard;
+  learn_item: SignalCard;
+  post_item: SignalCard;
+  try_item: SignalCard;
+  estimated_total_minutes: number;
+  why_selected: string;
+};
+
+export type CTOBriefing = {
+  id: string;
+  briefing_date: string;
+  what_matters: string;
+  why_it_matters: string;
+  should_care: "High" | "Medium" | "Low";
+  practical_action: string;
+  related_technologies: string[];
+  expected_impact: string;
 };
 
 export type CertificationByte = {
@@ -192,6 +217,52 @@ export type LinkedInIdea = {
   confidence_score: number;
 };
 
+export type ContentOpportunity = {
+  id: string;
+  briefing_date: string;
+  opportunity_type: "ai" | "data_engineering" | "engineering_leadership";
+  topic: string;
+  why_relevant_now: string;
+  source_links: Array<{ title: string; url?: string; source?: string }>;
+  talking_points: string[];
+  personal_angle: string;
+  opportunity_score: number;
+};
+
+export type CareerRadarItem = {
+  id: string;
+  briefing_date: string;
+  topic: string;
+  momentum_score: number;
+  why_growing: string;
+  relevance_to_data_engineer: string;
+  suggested_learning_action: string;
+};
+
+export type ToolRecommendation = {
+  id: string;
+  briefing_date: string;
+  tool_name: string;
+  what_it_does: string;
+  why_it_matters: string;
+  trial_step: string;
+  source_link?: string | null;
+};
+
+export type WeeklyReport = {
+  id: string;
+  week_start: string;
+  week_end: string;
+  biggest_ai_development: SignalCard;
+  biggest_data_engineering_development: SignalCard;
+  biggest_databricks_update: SignalCard;
+  most_discussed_trend: string;
+  top_video: SignalCard;
+  best_content_opportunity: SignalCard;
+  certification_topics_covered: string[];
+  recommended_focus_next_week: string;
+};
+
 export type IngestionRun = {
   id: string;
   run_date: string;
@@ -225,9 +296,15 @@ export type DailyBriefing = {
   total_read_time_minutes: number;
   items: BriefingItem[];
   certification_byte?: CertificationByte | null;
+  daily_focus?: DailyFocus | null;
+  cto_briefing?: CTOBriefing | null;
   daily_signal?: DailySignal | null;
   video_picks?: DailyVideoPick[];
   linkedin_ideas?: LinkedInIdea[];
+  content_opportunities?: ContentOpportunity[];
+  career_radar?: CareerRadarItem[];
+  tool_recommendations?: ToolRecommendation[];
+  weekly_report?: WeeklyReport | null;
   latest_ingestion_run?: IngestionRun | null;
 };
 

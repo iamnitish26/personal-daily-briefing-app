@@ -1,19 +1,27 @@
 import type {
   BriefingItem,
+  CareerRadarItem,
+  ContentOpportunity,
+  CTOBriefing,
   DailyBriefing,
+  DailyFocus,
   DailySignal,
   DailyVideoPick,
   IngestionRun,
   LinkedInIdea,
   RawItem,
   Source,
+  ToolRecommendation,
+  WeeklyReport,
   YouTubeVideo
 } from "@/lib/types";
 import { todayIsoDate } from "@/lib/date";
 import { fetchAllSourceItems } from "@/lib/ingest";
 import {
   enrichVideoPicks,
+  generateDailyActionIntelligence,
   generateDailySignal,
+  generateWeeklyIntelligenceReport,
   generateLinkedInIdeas,
   summarizeItems
 } from "@/lib/openai";
@@ -50,6 +58,16 @@ function normalizeStringArray(value: unknown): string[] {
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
+}
+
+function isSunday(date: string): boolean {
+  return new Date(`${date}T00:00:00.000Z`).getUTCDay() === 0;
+}
+
+function weekStartFor(date: string): string {
+  const current = new Date(`${date}T00:00:00.000Z`);
+  current.setUTCDate(current.getUTCDate() - current.getUTCDay());
+  return current.toISOString().slice(0, 10);
 }
 
 function dateDaysBefore(date: string, days: number): string {
@@ -207,9 +225,15 @@ export async function getTodayBriefing(): Promise<DailyBriefing | null> {
   const [
     { data: items, error: itemsError },
     { data: certificationByte },
+    { data: dailyFocus },
+    { data: ctoBriefing },
     { data: dailySignal },
     { data: videoPicks },
     { data: linkedinIdeas },
+    { data: contentOpportunities },
+    { data: careerRadar },
+    { data: toolRecommendations },
+    { data: weeklyReport },
     { data: latestRun }
   ] = await Promise.all([
       supabase
@@ -223,6 +247,8 @@ export async function getTodayBriefing(): Promise<DailyBriefing | null> {
         .select("*")
         .eq("briefing_date", date)
         .maybeSingle(),
+      supabase.from("daily_focus").select("*").eq("briefing_date", date).maybeSingle(),
+      supabase.from("cto_briefings").select("*").eq("briefing_date", date).maybeSingle(),
       supabase.from("daily_signals").select("*").eq("briefing_date", date).maybeSingle(),
       supabase
         .from("daily_video_picks")
@@ -234,6 +260,26 @@ export async function getTodayBriefing(): Promise<DailyBriefing | null> {
         .select("*")
         .eq("briefing_date", date)
         .order("idea_type"),
+      supabase
+        .from("content_opportunities")
+        .select("*")
+        .eq("briefing_date", date)
+        .order("opportunity_type"),
+      supabase
+        .from("career_radar")
+        .select("*")
+        .eq("briefing_date", date)
+        .order("momentum_score", { ascending: false }),
+      supabase
+        .from("tool_recommendations")
+        .select("*")
+        .eq("briefing_date", date)
+        .order("created_at"),
+      supabase
+        .from("weekly_reports")
+        .select("*")
+        .eq("week_end", date)
+        .maybeSingle(),
       supabase
         .from("ingestion_runs")
         .select("*")
@@ -253,9 +299,20 @@ export async function getTodayBriefing(): Promise<DailyBriefing | null> {
       related_technologies: normalizeStringArray(item.related_technologies)
     })),
     certification_byte: certificationByte ?? null,
+    daily_focus: (dailyFocus as DailyFocus | null) ?? null,
+    cto_briefing: ctoBriefing
+      ? ({
+          ...ctoBriefing,
+          related_technologies: normalizeStringArray(ctoBriefing.related_technologies)
+        } as CTOBriefing)
+      : null,
     daily_signal: (dailySignal as DailySignal | null) ?? null,
     video_picks: ((videoPicks ?? []) as DailyVideoPick[]) ?? [],
     linkedin_ideas: ((linkedinIdeas ?? []) as LinkedInIdea[]) ?? [],
+    content_opportunities: ((contentOpportunities ?? []) as ContentOpportunity[]) ?? [],
+    career_radar: ((careerRadar ?? []) as CareerRadarItem[]) ?? [],
+    tool_recommendations: ((toolRecommendations ?? []) as ToolRecommendation[]) ?? [],
+    weekly_report: (weeklyReport as WeeklyReport | null) ?? null,
     latest_ingestion_run: (latestRun as IngestionRun | null) ?? null
   };
 }
@@ -292,6 +349,7 @@ async function summarizeWithCache(items: RawItem[]) {
         detailed_summary: summary.detailed_summary ?? summary.summary,
         key_takeaways: summary.key_takeaways ?? [],
         why_it_matters: summary.why_it_matters,
+        suggested_action: summary.suggested_action ?? null,
         related_technologies: summary.related_technologies ?? [],
         category: summary.category,
         model: process.env.OPENAI_API_KEY ? "gpt-4o-mini" : "fallback",
@@ -328,6 +386,9 @@ async function summarizeWithCache(items: RawItem[]) {
       link: raw.url,
       category: cached?.category ?? raw.category,
       why_it_matters: cached?.why_it_matters ?? "This item matched the briefing profile.",
+      suggested_action:
+        cached?.suggested_action ??
+        "Decide whether this changes a tool, workflow, learning topic, or content idea.",
       read_time_minutes: 1,
       published_at: raw.published_at ?? null,
       saved: false
@@ -538,6 +599,7 @@ export async function runDailyIngestion(options: IngestionOptions = {}) {
         link: item.link,
         category: item.category,
         why_it_matters: item.why_it_matters,
+        suggested_action: item.suggested_action,
         detailed_summary: item.detailed_summary,
         key_takeaways: item.key_takeaways ?? [],
         related_technologies: item.related_technologies ?? [],
@@ -547,6 +609,23 @@ export async function runDailyIngestion(options: IngestionOptions = {}) {
       }))
     );
     if (error) throw error;
+
+    await supabase.from("expanded_summaries").upsert(
+      briefingItems.map((item) => ({
+        raw_item_hash: item.raw_item_id ?? item.link,
+        briefing_item_id: null,
+        short_summary: item.summary,
+        detailed_summary: item.detailed_summary ?? item.summary,
+        key_takeaways: item.key_takeaways ?? [],
+        why_it_matters: item.why_it_matters,
+        suggested_action:
+          item.suggested_action ??
+          "Use this item to decide what to read, learn, post, or try next.",
+        source_link: item.link,
+        updated_at: new Date().toISOString()
+      })),
+      { onConflict: "raw_item_hash" }
+    );
   }
 
   const { data: topics, error: topicsError } = await supabase
@@ -731,6 +810,109 @@ export async function runDailyIngestion(options: IngestionOptions = {}) {
     { onConflict: "briefing_date" }
   );
   if (signalError) throw signalError;
+
+  const actionIntelligence = await generateDailyActionIntelligence({
+    date,
+    briefingItems,
+    videos: videoPickModels,
+    linkedinIdeas: ideas.map((idea) => ({ id: "", briefing_date: date, ...idea })),
+    certificationTitle
+  });
+
+  const { error: focusError } = await supabase.from("daily_focus").upsert(
+    {
+      ...actionIntelligence.daily_focus,
+      updated_at: new Date().toISOString()
+    },
+    { onConflict: "briefing_date" }
+  );
+  if (focusError) throw focusError;
+
+  const { error: ctoError } = await supabase.from("cto_briefings").upsert(
+    {
+      ...actionIntelligence.cto_briefing,
+      updated_at: new Date().toISOString()
+    },
+    { onConflict: "briefing_date" }
+  );
+  if (ctoError) throw ctoError;
+
+  await supabase.from("content_opportunities").delete().eq("briefing_date", date);
+  if (actionIntelligence.content_opportunities.length) {
+    const { error } = await supabase.from("content_opportunities").insert(
+      actionIntelligence.content_opportunities.map((opportunity) => ({
+        briefing_date: date,
+        ...opportunity
+      }))
+    );
+    if (error) throw error;
+  }
+
+  await supabase.from("career_radar").delete().eq("briefing_date", date);
+  if (actionIntelligence.career_radar.length) {
+    const { error } = await supabase.from("career_radar").insert(
+      actionIntelligence.career_radar.map((item) => ({
+        briefing_date: date,
+        ...item
+      }))
+    );
+    if (error) throw error;
+  }
+
+  await supabase.from("tool_recommendations").delete().eq("briefing_date", date);
+  if (actionIntelligence.tool_recommendations.length) {
+    const { error } = await supabase.from("tool_recommendations").insert(
+      actionIntelligence.tool_recommendations.map((item) => ({
+        briefing_date: date,
+        ...item
+      }))
+    );
+    if (error) throw error;
+  }
+
+  if (isSunday(date)) {
+    const weekStart = weekStartFor(date);
+    const { data: weekItems } = await supabase
+      .from("briefing_items")
+      .select("*, briefings!inner(briefing_date)")
+      .gte("briefings.briefing_date", weekStart)
+      .lte("briefings.briefing_date", date);
+    const { data: weekVideos } = await supabase
+      .from("daily_video_picks")
+      .select("*, video:youtube_videos(*)")
+      .gte("briefing_date", weekStart)
+      .lte("briefing_date", date)
+      .order("rank");
+    const { data: weekContent } = await supabase
+      .from("content_opportunities")
+      .select("*")
+      .gte("briefing_date", weekStart)
+      .lte("briefing_date", date)
+      .order("opportunity_score", { ascending: false });
+    const { data: weekCertTopics } = await supabase
+      .from("certification_bytes")
+      .select("title")
+      .gte("briefing_date", weekStart)
+      .lte("briefing_date", date);
+
+    const weeklyReport = await generateWeeklyIntelligenceReport({
+      weekStart,
+      weekEnd: date,
+      items: (weekItems ?? []) as BriefingItem[],
+      videos: (weekVideos ?? []) as DailyVideoPick[],
+      contentOpportunities: (weekContent ?? []) as ContentOpportunity[],
+      certificationTopics: (weekCertTopics ?? []).map((item) => item.title as string)
+    });
+
+    const { error } = await supabase.from("weekly_reports").upsert(
+      {
+        ...weeklyReport,
+        updated_at: new Date().toISOString()
+      },
+      { onConflict: "week_end" }
+    );
+    if (error) throw error;
+  }
 
   if (runRow?.id) {
     await supabase

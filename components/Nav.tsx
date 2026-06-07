@@ -10,6 +10,9 @@ export function Nav() {
         Morning Briefing
       </Link>
       <div className="flex flex-wrap items-center gap-3 text-sm font-medium text-ink/70 dark:text-white/70">
+        <Link href="/reports" className="hover:text-ink dark:hover:text-white">
+          Reports
+        </Link>
         <Link href="/saved" className="hover:text-ink dark:hover:text-white">
           Saved
         </Link>

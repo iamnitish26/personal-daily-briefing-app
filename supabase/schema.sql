@@ -132,7 +132,10 @@ create table if not exists feedback (
   created_at timestamptz not null default now()
 );
 
--- Additive intelligence-dashboard schema is maintained in supabase/intelligence_upgrade.sql.
+-- Additive dashboard schema is maintained in:
+-- - supabase/intelligence_upgrade.sql
+-- - supabase/certification_quiz_upgrade.sql
+-- - supabase/personal_intelligence_upgrade.sql
 
 alter table sources enable row level security;
 alter table raw_items enable row level security;

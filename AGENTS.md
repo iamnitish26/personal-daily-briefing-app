@@ -11,6 +11,8 @@ The app should provide:
 * Databricks certification learning bytes.
 * Saved/bookmarked items.
 * Personal feedback such as “more like this” and “less like this”.
+* Daily action intelligence: what to read, watch, learn, post, and try.
+* Weekly intelligence reports.
 * Daily signal cards, YouTube intelligence, emerging trends, and LinkedIn content opportunities.
 
 Primary user profile:
@@ -157,6 +159,7 @@ Each news item should include:
 * Why it matters
 * Category
 * Relevance score
+* Suggested action
 
 Avoid:
 
@@ -211,6 +214,18 @@ Prioritise topics such as:
 * Monitoring and troubleshooting
 
 Do not invent official exam rules. If exam-specific facts are uncertain, phrase them as general preparation guidance.
+
+Daily intelligence should be generated during ingestion, never during page render.
+
+Each daily focus should answer:
+
+* What should I read?
+* What should I watch?
+* What should I learn?
+* What should I post about?
+* What should I try?
+
+Weekly reports should be generated on Sundays and stored for archive viewing.
 
 ⸻
 
